@@ -6,7 +6,6 @@
 # --- Generated Files ---
 # Ignore generated HTML reports and CSS files.
 *.html
-*.css
 
 # --- Python ---
 # Ignore Python cache files and virtual environments.
