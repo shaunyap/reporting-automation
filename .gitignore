@@ -1,0 +1,16 @@
+# --- Security ---
+# Ignore the environment directory containing sensitive credentials.
+# This is the most important rule in this file.
+.env/
+
+# --- Generated Files ---
+# Ignore generated HTML reports and CSS files.
+*.html
+*.css
+
+# --- Python ---
+# Ignore Python cache files and virtual environments.
+__pycache__/
+*.pyc
+venv/
+.venv/
