@@ -25,7 +25,8 @@ client = BetaAnalyticsDataClient()
 request = RunReportRequest(
     property=f"properties/{property_id}",
     dimensions=[
-        Dimension(name="sessionCustomChannelGroup:7871560290"),
+        Dimension(name="sessionCampaignName"),
+        Dimension(name="sessionSourceMedium"),
         Dimension(name="date"),
     ],
     metrics=[Metric(name="engagedSessions")],
@@ -48,12 +49,20 @@ request = RunReportRequest(
 response = client.run_report(request)
 
 # --- Process data for pivot table ---
-# Use a nested defaultdict to easily sum sessions per week for each channel
+# Use a nested defaultdict to easily sum sessions per week for each campaign
 pivoted_data = defaultdict(lambda: defaultdict(int))
 
+# Define campaigns to exclude
+excluded_campaigns = {'(direct)', '(organic)', '(referral)', '(not set)'}
+
 for row in response.rows:
-    channel = row.dimension_values[0].value
-    date_str = row.dimension_values[1].value
+    campaign = row.dimension_values[0].value
+    source_medium = row.dimension_values[1].value
+    # Skip excluded campaigns
+    if campaign in excluded_campaigns:
+        continue
+
+    date_str = row.dimension_values[2].value
     sessions = int(row.metric_values[0].value)
 
     # Convert date string (e.g., "20231225") to a datetime object
@@ -64,10 +73,13 @@ for row in response.rows:
     days_since_sunday = (current_date.weekday() + 1) % 7
     week_start_date = current_date - timedelta(days=days_since_sunday)
 
-    pivoted_data[channel][week_start_date] += sessions
+    pivoted_data[(campaign, source_medium)][week_start_date] += sessions
 
 # --- Convert data to a pandas DataFrame for easier manipulation ---
 df = pd.DataFrame.from_dict(pivoted_data, orient='index')
+
+# Set index names for the multi-level index
+df.index.names = ['Campaign', 'Source / Medium']
 
 # If no data, exit gracefully
 if df.empty:
@@ -84,12 +96,38 @@ df = df.fillna(0).astype(int)
 
 # --- Prepare data for chart and table ---
 
-# Sort channels by engaged sessions in the most recent week (descending)
+# Sort campaigns by engaged sessions in the most recent week (descending)
 most_recent_week = sorted_weeks[0]
-df = df.sort_values(by=most_recent_week, ascending=False)
+
+# --- Aggregate smaller campaigns into "Others" ---
+TOP_N = 20
+# Group by campaign to get total sessions for sorting and aggregation
+campaign_totals = df.groupby(level='Campaign')[most_recent_week].sum().sort_values(ascending=False)
+
+if len(campaign_totals) > TOP_N:
+    # Identify top N and other campaigns
+    top_campaign_names = campaign_totals.head(TOP_N).index
+    
+    # Filter for top campaigns
+    df_top = df[df.index.get_level_values('Campaign').isin(top_campaign_names)]
+
+    # Filter for other campaigns to be aggregated
+    df_others = df[~df.index.get_level_values('Campaign').isin(top_campaign_names)]
+    others_sum = df_others.sum()
+
+    # Rebuild the DataFrame with top campaigns and the 'Others' row
+    df = df_top.copy()
+    df.loc[('Others', ''), :] = others_sum
+
+    # Sort the DataFrame by the original campaign total order, with 'Others' at the end
+    sorted_campaign_order = top_campaign_names.tolist() + ['Others']
+    df = df.reindex(sorted_campaign_order, level='Campaign')
+
+# --- Prepare data for chart (aggregated by campaign) ---
+df_for_chart = df.groupby(level='Campaign').sum()
 
 # Add a 'Total' row at the bottom
-df.loc['Total'] = df.sum()
+df.loc[('Total', ''), :] = df.sum()
 
 # Create formatted column headers for display (e.g., "Dec 25 - Dec 31")
 def format_week_header(start_date):
@@ -101,35 +139,24 @@ display_columns = [format_week_header(d) for d in df.columns]
 
 # --- Create Stacked Bar Chart with Plotly ---
 
-# Define custom colors for specific channels
-channel_colors = {
-    'Direct': '#004b57',
-    'Organic Search': '#00a0b2',
-    'Paid Social': '#abb222',
-    'Paid Search': '#FF736E',
-    'Organic Social': ' #317a1c'
-}
-
 fig = go.Figure()
 
-# Iterate through channels (rows) to create each layer of the stack
-# We exclude the 'Total' row from the chart itself
-for channel in df.index.drop('Total'):
+# Iterate through the aggregated campaign data for the chart
+for campaign in df_for_chart.index:
     fig.add_trace(go.Bar(
         x=display_columns,
-        y=df.loc[channel],
-        name=channel,
-        hovertemplate=f'<b>{channel}</b><br>Week: %{{x}}<br>Engaged Sessions: %{{y:,}}<extra></extra>',
-        marker_color=channel_colors.get(channel)  # Use .get() for safe color lookup
+        y=df_for_chart.loc[campaign],
+        name=campaign,
+        hovertemplate=f'<b>{campaign}</b><br>Week: %{{x}}<br>Engaged Sessions: %{{y:,}}<extra></extra>',
     ))
 
 fig.update_layout(
     height=800,
     barmode='stack',
-    title_text='Weekly Engaged Sessions by Channel (Last 6 Weeks)',
+    title_text='Weekly Engaged Sessions by Campaign (Last 6 Weeks)',
     xaxis_title="Week (Sunday - Saturday)",
     yaxis_title="Engaged Sessions",
-    legend_title="Channels",
+    legend_title="Campaigns",
     template="plotly_white"
 )
 
@@ -141,7 +168,7 @@ chart_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
 # Format the DataFrame for the HTML table (add comma separators)
 df_display = df.copy()
 for col in df_display.columns:
-    df_display[col] = df_display[col].apply(lambda x: f"{x:,}")
+    df_display[col] = df_display[col].apply(lambda x: f"{x:,.0f}")
 
 # Rename columns to the display format and set index name
 df_display.columns = display_columns
@@ -153,11 +180,11 @@ table_html = df_display.to_html(classes='styled-table')
 html_template = f"""
 <html>
 <head>
-    <title>Analytics Report</title>
+    <title>Campaign Analytics Report</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>Google Analytics Weekly Report</h1>
+    <h1>Google Analytics Weekly Campaign Report</h1>
 
     {chart_html}
 
@@ -168,12 +195,15 @@ html_template = f"""
 
 # Add a class to the 'Total' row for styling
 html_template = html_template.replace(
-    '<tr>\n      <th>Total</th>', 
+    '<tr>\n      <th>Total</th>',
     '<tr class="total-row">\n      <th>Total</th>'
     )
 
-output_filename = "overview.html"
-with open(output_filename, "w") as f:
+output_dir = "reports"
+os.makedirs(output_dir, exist_ok=True)
+
+output_path = os.path.join(output_dir, "campaign.html")
+with open(output_path, "w") as f:
     f.write(html_template)
 
-print(f"Report successfully generated: {output_filename}")
+print(f"Report successfully generated: {output_path}")
