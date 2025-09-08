@@ -3,6 +3,7 @@ import os
 from datetime import date, timedelta
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, OrderBy
 from lib import ga_reporter
 
@@ -42,7 +43,10 @@ def main():
         Dimension(name="landingPage"),
         Dimension(name=CUSTOM_CHANNEL_DIMENSION),
     ]
-    metrics = [Metric(name="engagedSessions")]
+    metrics = [
+        Metric(name="engagedSessions"),
+        Metric(name="keyEvents")
+    ]
     order_bys = [
         OrderBy(metric=OrderBy.MetricOrderBy(metric_name="engagedSessions"), desc=True),
     ]
@@ -60,14 +64,21 @@ def main():
         sys.exit()
 
     # --- Prepare data for chart and table ---
-    # Get total sessions per landing page to determine the top N
-    page_totals = df_agg.groupby(level='Landing Page')['Engaged Sessions'].sum().sort_values(ascending=False)
-
-    top_chart_pages = page_totals.head(TOP_N_CHART).index
-    df_for_chart = df_agg[df_agg.index.get_level_values('Landing Page').isin(top_chart_pages)]
-
-    top_table_pages = page_totals.head(TOP_N_TABLE).index
+    # For the table, get the top N overall landing pages
+    page_totals_all = df_agg.groupby(level='Landing Page')['Engaged Sessions'].sum().sort_values(ascending=False)
+    top_table_pages = page_totals_all.head(TOP_N_TABLE).index
     df_for_table = df_agg[df_agg.index.get_level_values('Landing Page').isin(top_table_pages)]
+
+    # For the chart, filter out '/careers' pages first
+    landing_pages = df_agg.index.get_level_values('Landing Page')
+    df_chart_source = df_agg[~landing_pages.str.startswith('/careers')]
+
+    # Then, get the top N from the filtered data for the chart
+    page_totals_chart = df_chart_source.groupby(level='Landing Page')['Engaged Sessions'].sum().sort_values(ascending=False)
+    top_chart_pages = page_totals_chart.head(TOP_N_CHART).index
+    # Filter for the top pages and reindex to ensure they are sorted by total sessions
+    df_for_chart = df_chart_source[df_chart_source.index.get_level_values('Landing Page').isin(top_chart_pages)]
+    df_for_chart = df_for_chart.reindex(top_chart_pages, level='Landing Page')
 
     # Define a dynamic report title
     report_title = f"Top Landing Pages by Engaged Sessions for Week Ending {end_date.strftime('%B %d, %Y')}"
@@ -92,11 +103,13 @@ def process_landing_page_data(response, excluded_values=None):
 
         channel = row.dimension_values[1].value
         engaged_sessions = int(row.metric_values[0].value)
+        key_events = int(row.metric_values[1].value)
 
         report_data.append({
             'Landing Page': landing_page,
             'Channel': channel,
-            'Engaged Sessions': engaged_sessions
+            'Engaged Sessions': engaged_sessions,
+            'Key Events': key_events
         })
 
     if not report_data:
@@ -112,34 +125,49 @@ def process_landing_page_data(response, excluded_values=None):
 
 
 def create_landing_page_chart(df_chart):
-    """Creates a stacked bar chart of landing pages by channel."""
-    # Pivot data for stacking: index=Landing Page, columns=Channel, values=Engaged Sessions
-    df_pivot = df_chart.unstack(level='Channel').fillna(0)
-    df_pivot.columns = df_pivot.columns.droplevel(0)  # drop 'Engaged Sessions' from columns
+    """Creates a combined bar and line chart for top landing pages."""
+    # Create figure with a secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    fig = go.Figure()
+    # --- Prepare data for stacked bar (Engaged Sessions) and line chart (Key Events) ---
+    # Pivot for stacked bar chart of Engaged Sessions
+    df_pivot = df_chart['Engaged Sessions'].unstack(level='Channel').fillna(0)
+
+    # Aggregate total key events per landing page for the line chart
+    df_line = df_chart.groupby(level='Landing Page')['Key Events'].sum()
+    # Ensure the line data is in the same order as the bar chart data
+    df_line = df_line.reindex(df_pivot.index)
 
     # Sort channels by total sessions to stack largest at the bottom
     sorted_channels = df_pivot.sum().sort_values(ascending=False).index
 
+    # Add Bar Chart for Engaged Sessions (stacked by channel)
     for channel in sorted_channels:
         fig.add_trace(go.Bar(
             x=df_pivot.index,
             y=df_pivot[channel],
             name=channel,
             marker_color=CHANNEL_COLORS.get(channel),
-            hovertemplate='<b>%{x}</b><br>' + f'{channel}: %{{y:,}}<extra></extra>'
-        ))
+            hovertemplate='<b>%{x}</b><br>' + f'{channel} Sessions: %{{y:,}}<extra></extra>'
+        ), secondary_y=False)
+
+    # Add Line Chart for Key Events
+    fig.add_trace(go.Scatter(
+        x=df_line.index,
+        y=df_line,
+        name='Key Events',
+        mode='lines+markers',
+        line=dict(color='#d62728'),  # A distinct color for the line
+        hovertemplate='<b>%{x}</b><br>Total Key Events: %{y:,}<extra></extra>'
+    ), secondary_y=True)
 
     fig.update_layout(
         width=1080,
         height=700,
         barmode='stack',
         xaxis_title="Landing Page",
-        yaxis_title="Engaged Sessions",
-        legend_title="Channels",
+        legend_title="Metrics",
         template="plotly_white",
-        xaxis={'categoryorder': 'total descending'},
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -148,6 +176,11 @@ def create_landing_page_chart(df_chart):
             x=0
         )
     )
+
+    # Set y-axes titles
+    fig.update_yaxes(title_text="<b>Engaged Sessions</b>", secondary_y=False)
+    fig.update_yaxes(title_text="<b>Key Events</b>", secondary_y=True, rangemode="tozero")
+
     # Shorten landing page URLs on x-axis for readability
     fig.update_xaxes(tickangle=45, tickfont=dict(size=10),
                      tickvals=df_pivot.index,
@@ -160,6 +193,9 @@ def generate_landing_page_html_report(df_for_table, chart_html, report_title, ou
     """Generates and saves the final HTML report file for landing pages."""
     # Format the DataFrame for the HTML table
     df_display = df_for_table.copy()
+
+    # Calculate Key Event Rate, handle division by zero
+    df_display['Key Event Rate'] = (df_display['Key Events'] / df_display['Engaged Sessions']).fillna(0)
 
     # Truncate long landing page URLs for display in the table
     original_index = df_display.index
@@ -174,6 +210,8 @@ def generate_landing_page_html_report(df_for_table, chart_html, report_title, ou
 
     # Format numeric columns with commas
     df_display['Engaged Sessions'] = df_display['Engaged Sessions'].apply(lambda x: f"{x:,.0f}")
+    df_display['Key Events'] = df_display['Key Events'].apply(lambda x: f"{x:,.0f}")
+    df_display['Key Event Rate'] = df_display['Key Event Rate'].apply(lambda x: f"{x:.2%}")
 
     table_html = df_display.to_html(classes='styled-table')
 

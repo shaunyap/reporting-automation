@@ -172,7 +172,15 @@ def create_performance_chart(df_chart):
 
     # Set y-axes titles
     fig.update_yaxes(title_text="<b>Engaged Sessions</b>", secondary_y=False)
-    fig.update_yaxes(title_text="<b>Key Events</b>", secondary_y=True)
+
+    # Ensure the Key Events axis uses integer steps for its ticks.
+    # If the max value is small, force a step of 1. Otherwise, let Plotly decide
+    # on a larger integer step to avoid overcrowding the axis.
+    if not df_chart.empty and df_chart['Key Events'].max() < 10:
+        tick_step = 1
+    else:
+        tick_step = None  # Let Plotly auto-determine the tick step
+    fig.update_yaxes(title_text="<b>Key Events</b>", secondary_y=True, rangemode="tozero", dtick=tick_step)
 
     return fig.to_html(full_html=False, include_plotlyjs='cdn')
 

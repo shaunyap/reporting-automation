@@ -90,7 +90,9 @@ def prepare_report_data(df, top_n):
     df_aggregated = aggregate_campaigns(df, top_n)
 
     # Create a separate DataFrame for the chart (aggregated by campaign)
-    df_for_chart = df_aggregated.groupby(level='Campaign').sum()
+    # We use sort=False to preserve the custom order from aggregate_campaigns,
+    # which keeps 'Others' at the end so it can be stacked on top of the chart.
+    df_for_chart = df_aggregated.groupby(level='Campaign', sort=False).sum()
 
     # Create a separate DataFrame for the table with a 'Total' row
     df_for_table = df_aggregated.copy()
@@ -132,12 +134,20 @@ def create_chart(df_chart, display_columns):
 
     # Iterate through the aggregated campaign data for the chart
     for i, campaign in enumerate(df_chart.index):
-        # Assign a color from the list for the top campaigns, let Plotly handle the rest
-        color = CAMPAIGN_COLORS[i] if i < len(CAMPAIGN_COLORS) else None
+        # Truncate long campaign names for the legend, but keep the full name for hover
+        truncated_name = (
+            campaign if len(campaign) <= 17 else f"{campaign[:14]}..."
+        )
+        # Assign a specific color for 'Others', colors for top campaigns, and let Plotly handle the rest
+        if campaign == 'Others':
+            color = '#CCCCCC'
+        else:
+            color = CAMPAIGN_COLORS[i] if i < len(CAMPAIGN_COLORS) else None
+
         fig.add_trace(go.Bar(
             x=display_columns,
             y=df_chart.loc[campaign],
-            name=campaign,
+            name=truncated_name,
             marker_color=color,
             hovertemplate=f'<b>{campaign}</b><br>Week: %{{x}}<br>Engaged Sessions: %{{y:,}}<extra></extra>',
         ))

@@ -116,7 +116,8 @@ def main():
     # The user asked for "Active Sessions", which we'll interpret as "engagedSessions" for consistency.
     mtd_metrics = [
         Metric(name="activeUsers"),
-        Metric(name="engagedSessions")
+        Metric(name="engagedSessions"),
+        Metric(name="keyEvents")
     ]
 
     mtd_response = ga_reporter.run_ga_report(
@@ -130,9 +131,11 @@ def main():
 
     summary_stats["mtd_active_users"] = 0
     summary_stats["mtd_engaged_sessions"] = 0
+    summary_stats["mtd_key_events"] = 0
     if mtd_response.rows:
         summary_stats["mtd_active_users"] = int(mtd_response.rows[0].metric_values[0].value)
         summary_stats["mtd_engaged_sessions"] = int(mtd_response.rows[0].metric_values[1].value)
+        summary_stats["mtd_key_events"] = int(mtd_response.rows[0].metric_values[2].value)
 
     # --- Generate and save the final HTML file ---
     generate_overview_html_report(
@@ -210,6 +213,7 @@ def generate_overview_html_report(df_for_table, chart_html, report_title, output
         <h3 style="margin-top: 20px;">{mtd_month_header}</h3>
         <p>MTD Active Users: {summary_stats['mtd_active_users']:,}</p>
         <p>MTD Engaged Sessions: {summary_stats['mtd_engaged_sessions']:,}</p>
+        <p>MTD Key Events: {summary_stats['mtd_key_events']:,}</p>
     </div>
     """
 
