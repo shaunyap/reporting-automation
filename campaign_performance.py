@@ -70,11 +70,14 @@ def main():
         sys.exit()
 
     # --- Prepare data for chart and table ---
-    df_for_chart = df_agg.head(TOP_N_CHART)
-    df_for_table = df_agg.head(TOP_N_TABLE)
+    # Sort the data by Key Events in descending order for both the chart and table
+    df_sorted = df_agg.sort_values(by='Key Events', ascending=False)
+
+    df_for_chart = df_sorted.head(TOP_N_CHART)
+    df_for_table = df_sorted.head(TOP_N_TABLE)
 
     # Define the title that will be used for the H1 header
-    chart_title = f"Top {TOP_N_CHART} Campaigns Performance for Week Ending {end_date.strftime('%B %d, %Y')}"
+    chart_title = f"Top {TOP_N_CHART} Campaigns by Key Events for Week Ending {end_date.strftime('%B %d, %Y')}"
 
     # --- Create Performance Chart with Plotly ---
     chart_html = create_performance_chart(df_for_chart)
@@ -93,6 +96,10 @@ def process_performance_data(response, excluded_values=None):
         campaign = row.dimension_values[0].value
         if campaign in excluded_values:
             continue
+
+        # Truncate campaign name if it's longer than 40 characters
+        if len(campaign) > 40:
+            campaign = campaign[:40] + "..."
 
         source_medium = row.dimension_values[1].value
         engaged_sessions = int(row.metric_values[0].value)

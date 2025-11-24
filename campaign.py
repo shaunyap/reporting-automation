@@ -8,7 +8,7 @@ from lib import ga_reporter
 # --- Configuration ---
 PROPERTY_ID = "280436820"
 OUTPUT_PATH = "reports/campaign.html"
-REPORT_TITLE = "Weekly Engaged Sessions by Campaign (Last 6 Weeks)"
+REPORT_TITLE = "Campaign: Weekly Engaged Sessions (Last 6 Weeks)"
 TOP_N_CAMPAIGNS = 20
 
 # Define custom colors for the top 5 campaigns
