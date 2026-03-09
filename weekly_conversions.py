@@ -3,7 +3,6 @@ import os
 from datetime import date, timedelta
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, OrderBy
 from lib import ga_reporter
 
@@ -14,17 +13,14 @@ REPORT_TITLE = "Weekly Key Events by Campaign (Last 6 Weeks)"
 TOP_N_CAMPAIGNS = 20
 EXCLUDED_CAMPAIGNS = {}
  
-# Define a custom color list for the top campaigns and extend it with a built-in palette.
-CUSTOM_COLORS = [
+# Define custom colors for the top 5 campaigns
+CAMPAIGN_COLORS = [
     '#004b57',
     '#00a0b2',
     '#abb222',
     '#FF736E',
     '#317a1c'
 ]
-# Combine custom colors with a built-in palette, ensuring no duplicates.
-CHART_COLORS = CUSTOM_COLORS + [
-    color for color in px.colors.qualitative.Alphabet if color not in CUSTOM_COLORS]
 
 
 def main():
@@ -155,32 +151,25 @@ def create_chart(df_chart, display_columns):
     """Creates a stacked bar chart from the DataFrame."""
     fig = go.Figure()
 
-    color_index = 0
+    # Calculate totals to sort campaigns by volume (highest first) for stacking order
+    campaign_totals = df_chart.sum(axis=1).sort_values(ascending=False)
     
-    # Separate 'Other' to add it last, ensuring it's at the top of the stack.
-    other_data = None
-    if 'Other' in df_chart.index:
-        other_data = df_chart.loc['Other']
-        df_chart = df_chart.drop('Other')
+    color_index = 0
 
-    # Add traces for all campaigns except 'Other', largest at the bottom.
-    # We iterate in reverse because the data is sorted ascending.
-    for campaign in df_chart.index[::-1]:
-        color = CHART_COLORS[color_index % len(CHART_COLORS)]
-        color_index += 1
+    # Add traces for all campaigns, largest at the bottom.
+    for campaign in campaign_totals.index:
+        if campaign == 'Other':
+            color = '#CCCCCC'
+        else:
+            color = CAMPAIGN_COLORS[color_index] if color_index < len(CAMPAIGN_COLORS) else None
+            color_index += 1
+
         fig.add_trace(go.Bar(
             x=display_columns,
             y=df_chart.loc[campaign],
             name=campaign,
             marker_color=color,
             hovertemplate=f'<b>{campaign}</b><br>Week: %{{x}}<br>Key Events: %{{y:,}}<extra></extra>',
-        ))
-
-    # Add the 'Other' trace last to place it at the top.
-    if other_data is not None:
-        fig.add_trace(go.Bar(
-            x=display_columns, y=other_data, name='Other', marker_color='#cccccc',
-            hovertemplate='<b>Other</b><br>Week: %{{x}}<br>Key Events: %{{y:,}}<extra></extra>',
         ))
 
     fig.update_layout(

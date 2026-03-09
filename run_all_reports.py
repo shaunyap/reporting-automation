@@ -7,8 +7,6 @@ import campaign_performance
 import landing_page
 import weekly_conversions
 import formfills
-import paid_efficiency
-
 
 def run_all():
     """
@@ -17,13 +15,6 @@ def run_all():
     start_time = time.time()
     print("Starting all report generation tasks...")
     print("-" * 40)
-
-    # # --- Generate Paid Efficiency Report ---
-    # print("\n[1/6] Generating Paid Efficiency Report...")
-    # try:
-    #     paid_efficiency.main() 
-    # except Exception as e:
-    #     print(f"  -> ERROR: Failed to generate paid efficiency report: {e}")
 
     # --- Generate Overview Report (GA) ---
     print("\n[1/6] Generating Overview Report (GA)...")

@@ -12,18 +12,22 @@ def get_ga_client(credentials_path="./.env/credentials.json"):
     return BetaAnalyticsDataClient()
 
 
-def run_ga_report(client, property_id, dimensions, metrics, order_bys, date_ranges=None):
+def run_ga_report(client, property_id, dimensions, metrics, order_bys, date_ranges=None, segment=None):
     """Runs a report against the Google Analytics Data API v1."""
     if date_ranges is None:
         date_ranges = [DateRange(start_date="42daysAgo", end_date="yesterday")]
 
-    request = RunReportRequest(
-        property=f"properties/{property_id}",
-        dimensions=dimensions,
-        metrics=metrics,
-        date_ranges=date_ranges,
-        order_bys=order_bys,
-    )
+    request_args = {
+        "property": f"properties/{property_id}",
+        "dimensions": dimensions,
+        "metrics": metrics,
+        "date_ranges": date_ranges,
+        "order_bys": order_bys,
+    }
+    if segment:
+        request_args["segments"] = (segment,)
+
+    request = RunReportRequest(**request_args)
     return client.run_report(request)
 
 
